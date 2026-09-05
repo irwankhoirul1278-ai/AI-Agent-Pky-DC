@@ -160,7 +160,6 @@
   <header>
     <div>
       <div class="title">The <span>Odyssey</span></div>
-      <div class="sub">Hallo saya Odyssey, tugas saya disini adalah untuk membantumu dalam melakukan Track Unit yang Late Arrival & Early Arrival serta menyiapkan Report secara langsung ke CL/PL</div>
     </div>
     <div class="sub" id="statusLine">mode: mock data</div>
   </header>
@@ -524,16 +523,31 @@ Oncall", "Shift" (rentang jam KECIL per baris, misal 00:00-01:00, 01:00-02:00, d
 "Kehadiran Actual DW Reguler", "Kehadiran Actual DW Oncall".
 
 PENTING soal cara baca tabelnya — kolom-kolom angka (Permintaan Reguler/Oncall, Kehadiran Actual
-Reguler/Oncall) itu CELL YANG DI-MERGE secara visual: dalam satu hari ada BEBERAPA BLOK SHIFT BESAR
-(jumlahnya BISA BEDA-BEDA tiap gambar, JANGAN diasumsikan selalu 3 atau selalu jam yang sama — baca apa
-adanya dari gambar). Tiap blok shift besar itu keliatan dari beberapa baris jam kecil yang
-"digabung"/punya nilai "Position" yang sama secara berurutan; JAM SHIFT yang ditulis di report adalah
-jam AWAL baris paling atas sampai jam AKHIR baris paling bawah dalam blok itu (contoh: kalau blok
-mencakup baris kecil dari "00:00-01:00" sampai "08:00-09:00", maka ditulis "00:00-09:00"). Angka
-Permintaan/Kehadiran Actual buat tiap kolom itu CUMA NONGOL SEKALI di salah satu baris jam kecil di
-DALAM rentang vertikal blok shift itu (posisi barisnya bisa beda-beda tiap kolom, gak harus sejajar).
-Yang kamu ambil adalah SATU angka per kolom per blok shift (abaikan baris-baris kosong di sekitarnya),
-BUKAN dijumlah dari tiap baris jam kecil.
+Reguler/Oncall) itu CELL YANG DI-MERGE secara visual: dalam satu hari BISA ADA BANYAK BLOK SHIFT
+(jumlahnya BENER-BENER FLEKSIBEL — bisa 3, bisa 4, bisa 9, bisa lebih banyak lagi — JANGAN PERNAH
+dibatesin atau diasumsikan jumlah tertentu, sisir apa adanya dari gambar mulai jam paling pagi sampai
+paling malam).
+
+Batas tiap blok shift itu ditentuin dari GARIS/BORDER CELL YANG DI-MERGE di kolom-kolom ANGKA-nya sendiri
+(Permintaan DW Reguler, Permintaan DW Oncall, Kehadiran Actual DW Reguler, Kehadiran Actual DW Oncall) —
+BUKAN dari kolom "Position". Tiap kali kamu liat garis batas cell yang baru di salah satu kolom angka itu
+(baik barisnya ada angkanya maupun kosong), itu artinya SATU blok shift baru dimulai di baris situ, dan
+blok itu terus ke bawah sampai ketemu garis batas cell berikutnya (atau abis baris tabelnya). JANGAN
+gabungin dua blok shift jadi satu cuma gara-gara kolom "Position" di keduanya kebetulan nunjukin teks
+yang SAMA PERSIS — misal kalau "DW Experience Laki-Laki" muncul di dua dropdown Position yang terpisah
+dan berdekatan, itu TETAP DUA blok shift yang beda, masing-masing WAJIB punya baris "SHIFT Pukul ..."
+sendiri di report, walaupun teks Position-nya identik dan jam-nya nempel/tumpang tindih sama blok
+sebelahnya. Kolom "Position" cuma informasi tambahan per blok (boleh beda-beda, boleh kosong), BUKAN
+penentu penggabungan blok.
+
+JAM SHIFT yang ditulis di report adalah jam AWAL baris paling atas sampai jam AKHIR baris paling bawah
+DI DALAM blok itu (contoh: kalau satu blok cuma 1 baris jam kecil "00:00-09:00" doang, ditulis apa
+adanya "00:00-09:00"; kalau blok mencakup baris kecil dari "00:00-01:00" sampai "08:00-09:00", ditulis
+"00:00-09:00"). Angka Permintaan/Kehadiran Actual buat tiap kolom itu CUMA NONGOL SEKALI di salah satu
+baris jam kecil di DALAM rentang vertikal blok shift itu (posisi barisnya bisa beda-beda tiap kolom, gak
+harus sejajar, dan boleh aja kosong/dianggap 0 kalau emang gak ada angka di blok itu buat kolom
+tersebut). Yang kamu ambil adalah SATU angka per kolom per blok shift (abaikan baris-baris kosong di
+sekitarnya), BUKAN dijumlah dari tiap baris jam kecil, dan JANGAN diambil dari blok lain yang beda.
 
 Untuk TIAP blok SHIFT yang kamu temuin di gambar (berapa pun jumlahnya, jam berapa pun rentangnya —
 ikutin gambar, jangan hardcode), hitung:
@@ -619,12 +633,12 @@ Late/Early Arrival Issue's
 (tulis tanggal yang relevan di sini, format DD/MM/YYYY)
 <baris kosong>
 1. LT Number : (isi tripNum)
-          Vendor : (isi vendorName)
-          Driver : (isi driver)
-          Qty Parcel : (isi qtyParcelVal)
-          STA : (isi staDest, format jam di atas)
-          ATA : (isi ataDest, format jam di atas — kalau belum ada tulis "-")
-          Travel Time : (isi durasi tempuh, format "Xh Ym")
+   Vendor : (isi vendorName)
+   Driver : (isi driver)
+   Qty Parcel : (isi qtyParcelVal)
+   STA : (isi staDest, format jam di atas)
+   ATA : (isi ataDest, format jam di atas — kalau belum ada tulis "-")
+   Travel Time : (isi durasi tempuh, format "Xh Ym")
 <baris kosong>
 2. LT Number : ...dst, angka urut lanjut buat tiap trip berikutnya, dengan struktur field yang SAMA PERSIS.
 
