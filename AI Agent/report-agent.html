@@ -181,7 +181,7 @@
         <span class="hint">Gambar siap dikirim — tambahin pertanyaan (opsional) lalu Kirim</span>
       </div>
       <div class="chat-input-inner">
-        <input id="chatInput" type="text" placeholder='Tanya AI Agent... misal "ada unit Late Arrival hari ini?" (bisa paste gambar Ctrl+V)'>
+        <input id="chatInput" type="text" placeholder='Tanya AI Agent...'>
         <button id="sendBtn">Kirim</button>
       </div>
     </div>
@@ -691,7 +691,11 @@ Contoh buat jawaban singkat 1 baris, "replyLines" tetap array isi 1 item, misal:
     // (constant GEMINI_MODEL) — model Gemini flash-nya udah multimodal jadi gak
     // perlu ganti model/parameter khusus kalau ada gambar terlampir.
     const requestBody = {
-      max_tokens: isDataQuery ? 3000 : 1500, // mode report dikasih jatah lebih gede
+      // Mode DW report sekarang bisa ngeluarin BANYAK blok SHIFT (gak dibatesin 3-4 lagi,
+      // bisa 9+ tergantung gambar) — jatah token-nya WAJIB lebih gede dari mode data biasa,
+      // biar jawabannya gak kepotong di tengah JSON (yang bikin parse gagal & muncul pesan
+      // "format balasan AI-nya berantakan").
+      max_tokens: isDwReport ? 6000 : (isDataQuery ? 3000 : 1500),
       // Level thinking: mode data (trip JSON / DW report) butuh AI teliti nyisir
       // data satu-satu DAN gak kebawa topik riwayat obrolan sebelumnya (misal abis
       // ditanya report DW, terus ditanya Late Arrival trip — pernah kejadian
