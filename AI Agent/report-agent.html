@@ -17,6 +17,9 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<!-- Chart.js buat fitur "Micro-Charts di dalam Chat" — dipanggil on-demand tiap
+     balasan AI nyertain field "chart" di JSON-nya (lihat renderChart() di bawah). -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 
 <style>
   :root{
@@ -100,6 +103,12 @@
   }
   .attach-card td{padding:5px 6px; border-bottom:1px solid #ECE7D8; font-family:'IBM Plex Mono',monospace; white-space:nowrap;}
   .attach-card tr:last-child td{border-bottom:none;}
+  .action-btn{
+    background:#2D9C8C; color:#fff; border:none; border-radius:5px;
+    padding:3px 8px; font-size:10px; font-weight:600; cursor:pointer; font-family:inherit;
+  }
+  .action-btn:hover{background:#237A70;}
+  .action-btn:disabled{background:#B8B29A; cursor:default;}
   .badge{display:inline-block; padding:1px 7px; border-radius:20px; font-size:10px; font-family:'IBM Plex Sans',sans-serif; font-weight:600;}
   .badge-late{background:rgba(228,96,77,.15); color:#C6482F;}
   .badge-early{background:rgba(45,150,140,.15); color:#237A70;}
@@ -135,8 +144,9 @@
   }
   .chat-input-inner button:disabled{opacity:.5; cursor:default;}
 
-  .img-preview-row{display:none; align-items:center; gap:10px; padding:4px 4px 0;}
+  .img-preview-row{display:none; flex-direction:column; gap:6px; padding:4px 4px 0;}
   .img-preview-row.show{display:flex;}
+  .img-preview-row .thumb-list{display:flex; flex-wrap:wrap; gap:10px;}
   .img-preview-row .thumb-wrap{position:relative; width:52px; height:52px; flex:none;}
   .img-preview-row img{width:52px; height:52px; object-fit:cover; border-radius:8px; border:1px solid var(--line); display:block;}
   .img-preview-row .remove-img{
@@ -146,7 +156,34 @@
   }
   .img-preview-row .hint{font-size:11px; color:var(--muted);}
 
-  .msg-image{max-width:220px; border-radius:10px; border:1px solid var(--line); display:block; cursor:zoom-in;}
+  .msg-image{max-width:220px; border-radius:10px; border:1px solid var(--line); display:block; cursor:zoom-in; margin-bottom:4px;}
+
+  /* ===== Drag-and-drop overlay di seluruh chat panel ===== */
+  .chat-panel{position:relative;}
+  .chat-panel.drag-over{border-color:var(--cyan);}
+  .chat-panel.drag-over::after{
+    content:"Lepas di sini buat lampirin gambar"; position:absolute; inset:0; z-index:5;
+    background:rgba(16,20,26,.85); border:2px dashed var(--cyan); border-radius:var(--radius);
+    display:flex; align-items:center; justify-content:center; font-size:14px; color:var(--cyan);
+    pointer-events:none;
+  }
+
+  /* ===== Micro-chart di dalam bubble chat ===== */
+  .chart-wrap{
+    width:100%; max-width:280px; height:220px; background:var(--panel-2);
+    border:1px solid var(--line); border-radius:10px; padding:10px; margin-top:2px;
+  }
+
+  /* ===== Quick Action Chips ===== */
+  .chip-row{display:flex; gap:8px; overflow-x:auto; padding:0 2px 2px;}
+  .chip-row::-webkit-scrollbar{height:4px;}
+  .chip-row::-webkit-scrollbar-thumb{background:var(--line); border-radius:4px;}
+  .chip{
+    flex:none; background:var(--panel-2); border:1px solid var(--line); color:var(--text);
+    border-radius:20px; padding:6px 14px; font-size:12px; cursor:pointer; font-family:inherit; white-space:nowrap;
+    transition:.15s;
+  }
+  .chip:hover{border-color:var(--amber); color:var(--amber);}
 
   details.note-details{margin-top:12px; font-size:12px; color:var(--muted);}
   details.note-details summary{cursor:pointer; color:var(--cyan);}
@@ -176,17 +213,21 @@
       <option value="gemini-3.5-flash-lite">3.5 Flash Lite</option>
     </select>
     <button class="icon-btn" id="refreshBtn">Refresh Data</button>
+    <button class="icon-btn" id="clearChatBtn">Chat Baru</button>
   </div>
 
   <div class="chat-panel">
     <div id="chatLog"></div>
     <div class="chat-input-row">
+      <div class="chip-row" id="chipRow">
+        <button class="chip" type="button" data-prompt="Cek unit Late Arrival hari ini">Cek Late Hari Ini</button>
+        <button class="chip" type="button" data-prompt="Cek unit Early Arrived hari ini">Cek Early Hari Ini</button>
+        <button class="chip" type="button" data-prompt="Generate Report Fulfillment DW hari ini">Generate Report DW</button>
+        <button class="chip" type="button" data-prompt="Gimana perbandingan jumlah trip tepat waktu vs telat hari ini?">Tepat Waktu vs Telat</button>
+      </div>
       <div class="img-preview-row" id="imgPreviewRow">
-        <div class="thumb-wrap">
-          <img id="imgPreviewThumb" src="" alt="preview">
-          <button class="remove-img" id="removeImgBtn" type="button" title="Hapus gambar">✕</button>
-        </div>
-        <span class="hint">Gambar siap dikirim — tambahin pertanyaan (opsional) lalu Kirim</span>
+        <div class="thumb-list" id="thumbList"></div>
+        <span class="hint">Gambar siap dikirim (bisa lebih dari 1, atau drag & drop ke panel chat) — tambahin pertanyaan (opsional) lalu Kirim</span>
       </div>
       <div class="chat-input-inner">
         <input id="chatInput" type="text" placeholder='Tanya Odyssey... '>
@@ -244,7 +285,11 @@ function fetchLiveTrips(){
     db.ref(LH_PATH).once("value")
       .then(snap => {
         const val = snap.val() || {};
-        resolve(Object.keys(val).map(k => val[k]));
+        // Simpen key Firebase asli (_fbKey) di tiap trip — SEBELUMNYA dibuang
+        // begitu aja (cuma val[k]), padahal ini WAJIB ada buat nulis balik ke
+        // record yang BENER pas fitur "Set Tiba" dipake (kalau salah sasaran
+        // bisa nimpa data trip lain).
+        resolve(Object.keys(val).map(k => Object.assign({ _fbKey: k }, val[k])));
       })
       .catch(reject);
   });
@@ -287,6 +332,10 @@ function normalizeTrip(t){
   const dateSourceRaw = t.atdOrigin || t.stdOrigin;
   const dateSource = dateSourceRaw ? new Date(dateSourceRaw) : null;
   return {
+    // _fbKey: key asli node Firebase (null di mock data) — dipake INTERNAL
+    // doang buat target update "Set Tiba", SENGAJA gak dikirim ke prompt AI
+    // (di-strip pas bikin dump JSON, lihat tripsForPrompt di askAgent).
+    _fbKey: t._fbKey || null,
     tripNum: t.tripNum || "-",
     routeName: t.routeName || "-",
     vendorName: t.vendorName || "-",
@@ -335,9 +384,23 @@ function badgeClassFor(status){
   return "badge-ontime";
 }
 
+// Escape dasar buat nilai yang ditaruh di ATRIBUT HTML (data-trip) — tripNum
+// dari AI TETEP mesti dianggap "gak dipercaya penuh" walau harusnya cuma
+// nyalin dari data, biar gak ada celah HTML/attribute break.
+function escapeHtmlAttr(s){
+  return String(s == null ? "" : s)
+    .replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
 function renderAttachCard(units){
   if (!units || units.length === 0) return "";
   let rows = units.map(u => {
+    // Tombol "Set Tiba" CUMA muncul buat unit yang statusnya "In Transit" —
+    // status lain (udah final/Late/Early/On Time) gak relevan buat ditandain
+    // "baru tiba" lagi.
+    const actionCell = u.status === "In Transit"
+      ? `<button type="button" class="action-btn set-arrived-btn" data-trip="${escapeHtmlAttr(u.tripNum)}">Set Tiba</button>`
+      : "-";
     return `<tr>
       <td>${u.tripNum||"-"}</td>
       <td>${u.vehiclePlate||"-"}</td>
@@ -345,15 +408,100 @@ function renderAttachCard(units){
       <td>${u.atdOrigin?fmtTime(u.atdOrigin):"-"}</td>
       <td>${u.ataDest?fmtTime(u.ataDest):"-"}</td>
       <td><span class="badge ${badgeClassFor(u.status)}">${u.status||"-"}</span></td>
+      <td>${actionCell}</td>
     </tr>`;
   }).join("");
   return `<div class="attach-card"><table>
-    <thead><tr><th>Trip</th><th>No Truk</th><th>Vendor</th><th>Berangkat</th><th>Tiba</th><th>Status</th></tr></thead>
+    <thead><tr><th>Trip</th><th>No Truk</th><th>Vendor</th><th>Berangkat</th><th>Tiba</th><th>Status</th><th>Aksi</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;
 }
 
-function addMessage(role, text, attachUnits, imageDataUrl){
+// ===== Interactive Report Table: "Set Tiba" =====
+// Klik tombol → cari trip aslinya di currentTrips (SUMBER KEBENARAN, bukan
+// dari attachUnits yang dikasih AI — AI cuma nyalin data buat ditampilin,
+// tapi target update Firebase HARUS dari data asli biar _fbKey-nya valid &
+// gak keliru sasaran).
+function handleSetArrivedClick(btn){
+  const tripNum = btn.dataset.trip;
+  const trip = currentTrips.find(t => t.tripNum === tripNum);
+  if (!trip){
+    btn.textContent = "Gak ketemu di data";
+    btn.disabled = true;
+    return;
+  }
+  if (!trip._fbKey){
+    // Mode mock data (belum login/live) — gak ada record Firebase asli buat
+    // ditulisin, jadi tombolnya sengaja dimatiin biar gak nyasar/gagal diam-diam.
+    btn.textContent = "Mode contoh";
+    btn.disabled = true;
+    return;
+  }
+  if (!window.firebase || !firebase.apps || !firebase.apps.length || !firebase.auth || !firebase.auth().currentUser){
+    btn.textContent = "Belum login";
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = "Nyimpen...";
+  const nowIso = new Date().toISOString();
+  firebase.database().ref(LH_PATH + "/" + trip._fbKey).update({ ataDest: nowIso })
+    .then(() => {
+      btn.textContent = "✓ Tiba";
+      // Sync ulang currentTrips dari Firebase biar status/badge di dashboard
+      // DAN konteks JSON yang bakal dikirim ke AI di pertanyaan berikutnya
+      // ikut ke-update (gak nyisain data basi di memori browser).
+      loadData();
+    })
+    .catch(err => {
+      console.error(err);
+      btn.textContent = "Gagal, klik lagi";
+      btn.disabled = false;
+    });
+}
+
+// ===== Micro-Charts di dalam Chat — dipanggil dari addMessage() kalau AI =====
+// nyertain field "chart" di JSON balasannya (lihat instruksi di jsonFormatRule).
+const CHART_COLORS = ["#E8A33D","#4FD1C5","#E4604D","#8B93A1","#6C8EF5","#C77DFF","#63D471","#F27DB0"];
+function renderChart(canvas, spec){
+  if (typeof Chart === "undefined"){
+    console.warn("Chart.js belum ke-load, skip render chart.");
+    return;
+  }
+  const type = (spec.type === "bar" || spec.type === "line") ? spec.type : "pie";
+  const isCategorical = (type === "pie");
+  try{
+    new Chart(canvas.getContext("2d"), {
+      type: type,
+      data: {
+        labels: spec.labels || [],
+        datasets: [{
+          label: spec.title || "",
+          data: spec.data || [],
+          backgroundColor: isCategorical ? CHART_COLORS : CHART_COLORS[0],
+          borderColor: type === "line" ? CHART_COLORS[1] : "transparent",
+          borderWidth: type === "line" ? 2 : 0,
+          tension: type === "line" ? .3 : 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: isCategorical, labels: { color: "#8B93A1", font: { size: 11 } } },
+          title: { display: !!spec.title, text: spec.title || "", color: "#E7EAEE", font: { size: 12 } }
+        },
+        scales: isCategorical ? {} : {
+          x: { ticks: { color: "#8B93A1" }, grid: { color: "#2B3341" } },
+          y: { ticks: { color: "#8B93A1" }, grid: { color: "#2B3341" }, beginAtZero: true }
+        }
+      }
+    });
+  }catch(e){
+    console.warn("Gagal render chart:", e.message);
+  }
+}
+
+function addMessage(role, text, attachUnits, imageDataUrls, chartSpec){
   const log = document.getElementById("chatLog");
   const wrap = document.createElement("div");
   wrap.className = "msg " + (role==="user" ? "user" : "agent");
@@ -361,14 +509,17 @@ function addMessage(role, text, attachUnits, imageDataUrl){
   who.className = "who";
   who.textContent = role==="user" ? "Lo" : "Odyssey";
   wrap.appendChild(who);
-  if (imageDataUrl){
+  // imageDataUrls bisa array (multi-image) ATAU string tunggal (kompatibel sama
+  // pemanggilan lama) — dinormalisasi jadi array di sini.
+  const images = Array.isArray(imageDataUrls) ? imageDataUrls : (imageDataUrls ? [imageDataUrls] : []);
+  images.forEach(url => {
     const img = document.createElement("img");
     img.className = "msg-image";
-    img.src = imageDataUrl;
+    img.src = url;
     img.alt = "gambar terlampir";
-    img.addEventListener("click", () => window.open(imageDataUrl, "_blank"));
+    img.addEventListener("click", () => window.open(url, "_blank"));
     wrap.appendChild(img);
-  }
+  });
   if (text && text.trim()){
     const bubble = document.createElement("div");
     bubble.className = "bubble";
@@ -379,6 +530,19 @@ function addMessage(role, text, attachUnits, imageDataUrl){
     const card = document.createElement("div");
     card.innerHTML = renderAttachCard(attachUnits);
     wrap.appendChild(card);
+    // innerHTML gak nge-attach event listener otomatis, jadi di-wire manual
+    // abis elemen-elemennya bener-bener ada di DOM.
+    card.querySelectorAll(".set-arrived-btn").forEach(btn => {
+      btn.addEventListener("click", () => handleSetArrivedClick(btn));
+    });
+  }
+  if (chartSpec && Array.isArray(chartSpec.data) && chartSpec.data.length){
+    const chartBox = document.createElement("div");
+    chartBox.className = "chart-wrap";
+    const canvas = document.createElement("canvas");
+    chartBox.appendChild(canvas);
+    wrap.appendChild(chartBox);
+    renderChart(canvas, chartSpec);
   }
   if (role !== "user" && text && text.trim()){
     const copyBtn = document.createElement("button");
@@ -473,20 +637,30 @@ function simplifyErrorMessage(raw){
   return "Waduh, gagal ngambil jawaban AI bro. Coba tanya ulang sebentar lagi ya.";
 }
 
-async function askAgent(question, imageDataUrl){
-  addMessage("user", question, null, imageDataUrl);
+async function askAgent(question, imageDataUrls){
+  // imageDataUrls sekarang ARRAY (dukung multi-image sekaligus) — tetap terima
+  // string tunggal juga (kompatibel kalau ada pemanggilan lama).
+  const images = Array.isArray(imageDataUrls) ? imageDataUrls : (imageDataUrls ? [imageDataUrls] : []);
+  addMessage("user", question, null, images);
   // Kalau ada gambar, isi content jadi array format vision (OpenAI-compatible)
-  // biar bisa dikirim ke model yang bisa "lihat" gambar lewat proxy.
-  const userContent = imageDataUrl
+  // biar bisa dikirim ke model yang bisa "lihat" gambar lewat proxy. Bisa lebih
+  // dari 1 part image_url sekaligus — toGeminiParts() di bawah udah nge-map
+  // tiap part apa adanya ke Gemini inline_data.
+  const userContent = images.length
     ? [
-        { type:"text", text: question || "Tolong lihat & jelasin gambar ini bro." },
-        { type:"image_url", image_url:{ url: imageDataUrl } }
+        { type:"text", text: question || (images.length > 1 ? "Tolong lihat & jelasin gambar-gambar ini bro." : "Tolong lihat & jelasin gambar ini bro.") },
+        ...images.map(url => ({ type:"image_url", image_url:{ url } }))
       ]
     : question;
-  chatHistory.push({role:"user", content: userContent, hasImage: !!imageDataUrl});
+  chatHistory.push({role:"user", content: userContent, hasImage: images.length > 0});
+  saveChatHistory();
   addTyping();
 
   const lateCount = currentTrips.filter(t => t.status === "Late Arrival").length;
+  // _fbKey itu detail internal (buat target update Firebase doang) — SENGAJA
+  // di-strip dari dump yang dikirim ke AI, gak relevan buat jawaban & gak
+  // perlu ke-expose ke prompt/riwayat obrolan.
+  const tripsForPrompt = currentTrips.map(({ _fbKey, ...rest }) => rest);
 
   // Deteksi simpel: pertanyaan ini soal DATA TRIP (report/status/vendor/dll) atau
   // cuma obrolan santai yang gak butuh data? Kalau cuma basa-basi ("bro", "makasih",
@@ -499,7 +673,7 @@ async function askAgent(question, imageDataUrl){
   // yang di-paste user (screenshot spreadsheet shift/permintaan/kehadiran).
   const dwKeywords = /\bdw\b|fulfillment|daily worker|reguler|on-?call/i;
   const isDwReport = dwKeywords.test(question || "");
-  const isDataQuery = isDwReport || dataKeywords.test(question || "") || !!imageDataUrl;
+  const isDataQuery = isDwReport || dataKeywords.test(question || "") || images.length > 0;
 
   const basePersona = `Kamu Odyssey — AI Agent yang awalnya dibikin buat bantu Shift Lead Sortation Center
 mantau trip Inbound (Line Haul dari origin ke DC), TAPI wawasan kamu gak kebatas itu doang. Kamu punya
@@ -514,10 +688,28 @@ code fence, persis format ini:
 JANGAN pernah taruh karakter enter/newline literal ATAU escape \\n di DALAM satu item, kalau butuh baris
 baru bikin item array baru (baris kosong = string kosong \"\")"], "attachedUnits": []}
 
+Field "attachedUnits" itu buat nampilin TABEL RINGKAS unit trip yang lagi kamu bahas (dirender terpisah
+di UI, JANGAN diulang lagi isinya di dalam "replyLines" biar gak dobel). Isi array ini kalau jawaban kamu
+NUNJUK ke unit/trip TERTENTU dari data JSON yang dikasih (misal user nanya status, daftar Late/Early/In
+Transit, atau sebut LT Number spesifik) — tiap item HARUS objek dengan field PERSIS ini, disalin APA
+ADANYA dari data (jangan ubah/ngarang nilainya):
+{"tripNum": "...", "vehiclePlate": "...", "vendorName": "...", "atdOrigin": "...", "ataDest": "...", "status": "..."}
+Kalau jawaban kamu gak nyebut unit spesifik (obrolan santai, atau summary tanpa rincian per-unit), biarin
+"attachedUnits" array kosong [].
+
 Kalau jawabannya butuh nulis KODE/HTML/script panjang: tetap ikutin aturan array di atas — PECAH tiap
 baris kode jadi 1 item array terpisah (persis kayak baris asli kodenya, boleh diawali spasi buat
 indentasi), JANGAN digabung jadi satu string panjang dengan escape \\n. Kalau ada tanda kutip dua (")
-DI DALAM baris kode/teks, WAJIB di-escape jadi \\" biar JSON-nya tetep valid.`;
+DI DALAM baris kode/teks, WAJIB di-escape jadi \\" biar JSON-nya tetep valid.
+
+OPSIONAL — Micro-chart: kalau pertanyaan user itu soal PERBANDINGAN/STATISTIK sederhana (misal "berapa
+yang telat vs tepat waktu", "perbandingan vendor A vs B", dll) DAN kamu punya angka PASTI dari data yang
+tersedia (BUKAN ngarang/estimasi), kamu BOLEH tambahin field "chart" TAMBAHAN di JSON (di luar
+"replyLines" yang tetep wajib diisi ringkasan teksnya) persis format ini:
+{"chart": {"type": "pie", "title": "judul singkat grafik", "labels": ["Label A","Label B"], "data": [angka, angka]}}
+"type" cuma boleh salah satu dari "pie", "bar", "line". Jumlah item "labels" dan "data" harus SAMA
+PERSIS. Kalau gak ada angka pasti / pertanyaannya gak butuh visual, JANGAN sertain field "chart" sama
+sekali (hapus field-nya, jangan diisi array/objek kosong).`;
 
   let systemPrompt;
   if (isDwReport){
@@ -666,7 +858,7 @@ jangan pakai template ini — jawab santai aja bilang gak ada.
 
 Data trip tercatat, total ${currentTrips.length} trip, dengan ${lateCount} di antaranya berstatus
 "Late Arrival" (JSON):
-${JSON.stringify(currentTrips, null, 2)}
+${JSON.stringify(tripsForPrompt, null, 2)}
 
 ${jsonFormatRule}
 
@@ -819,10 +1011,16 @@ Contoh buat jawaban singkat 1 baris, "replyLines" tetap array isi 1 item, misal:
     } else if (typeof parsed.reply === "string"){
       replyText = parsed.reply;
     }
+    // Field "chart" opsional (lihat jsonFormatRule) — divalidasi dulu biar gak
+    // nyoba render Chart.js dengan data yang gak lengkap/rusak.
+    const chartSpec = (parsed.chart && Array.isArray(parsed.chart.data) && Array.isArray(parsed.chart.labels)
+      && parsed.chart.data.length && parsed.chart.data.length === parsed.chart.labels.length)
+      ? parsed.chart : null;
 
     removeTyping();
-    addMessage("agent", replyText, parsed.attachedUnits);
+    addMessage("agent", replyText, parsed.attachedUnits, null, chartSpec);
     chatHistory.push({role:"assistant", content: replyText});
+    saveChatHistory();
   }catch(e){
     console.error(e);
     removeTyping();
@@ -832,48 +1030,114 @@ Contoh buat jawaban singkat 1 baris, "replyLines" tetap array isi 1 item, misal:
 
 document.getElementById("refreshBtn").addEventListener("click", loadData);
 
-// ===== Attach gambar via paste (Ctrl+V) =====
-let pendingImageDataUrl = null;
+// ===== Attach gambar via paste (Ctrl+V), drag-and-drop, ATAU beberapa gambar =====
+// sekaligus (bukan cuma 1 kayak sebelumnya). pendingImages sekarang ARRAY.
+let pendingImages = [];
+const MAX_PENDING_IMAGES = 6; // batas wajar biar payload ke proxy gak kegedean
 
-function setPendingImage(dataUrl){
-  pendingImageDataUrl = dataUrl;
+function renderPendingImages(){
   const row = document.getElementById("imgPreviewRow");
-  const thumb = document.getElementById("imgPreviewThumb");
-  thumb.src = dataUrl;
-  row.classList.add("show");
+  const list = document.getElementById("thumbList");
+  list.innerHTML = "";
+  pendingImages.forEach((dataUrl, idx) => {
+    const thumbWrap = document.createElement("div");
+    thumbWrap.className = "thumb-wrap";
+    const img = document.createElement("img");
+    img.src = dataUrl;
+    img.alt = "preview";
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "remove-img";
+    removeBtn.type = "button";
+    removeBtn.title = "Hapus gambar";
+    removeBtn.textContent = "✕";
+    removeBtn.addEventListener("click", () => {
+      pendingImages.splice(idx, 1);
+      renderPendingImages();
+    });
+    thumbWrap.appendChild(img);
+    thumbWrap.appendChild(removeBtn);
+    list.appendChild(thumbWrap);
+  });
+  row.classList.toggle("show", pendingImages.length > 0);
 }
-function clearPendingImage(){
-  pendingImageDataUrl = null;
-  const row = document.getElementById("imgPreviewRow");
-  row.classList.remove("show");
-  document.getElementById("imgPreviewThumb").src = "";
+function addPendingImage(dataUrl){
+  if (pendingImages.length >= MAX_PENDING_IMAGES) return;
+  pendingImages.push(dataUrl);
+  renderPendingImages();
+}
+function clearPendingImages(){
+  pendingImages = [];
+  renderPendingImages();
+}
+// Terima FileList (dari drop ATAU dari input file) dan tambahin tiap file
+// bertipe gambar ke antrian pendingImages.
+function addImageFiles(fileList){
+  Array.from(fileList || []).forEach(file => {
+    if (!file || !file.type || file.type.indexOf("image") === -1) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => addPendingImage(ev.target.result);
+    reader.readAsDataURL(file);
+  });
 }
 function handlePasteEvent(e){
   const items = (e.clipboardData || e.originalEvent && e.originalEvent.clipboardData || {}).items;
   if (!items) return;
+  let pastedAny = false;
   for (const item of items){
     if (item.type && item.type.indexOf("image") !== -1){
       const file = item.getAsFile();
       if (!file) continue;
       const reader = new FileReader();
-      reader.onload = (ev) => setPendingImage(ev.target.result);
+      reader.onload = (ev) => addPendingImage(ev.target.result);
       reader.readAsDataURL(file);
-      e.preventDefault();
-      break;
+      pastedAny = true;
     }
   }
+  if (pastedAny) e.preventDefault();
 }
 document.getElementById("chatInput").addEventListener("paste", handlePasteEvent);
-document.getElementById("removeImgBtn").addEventListener("click", clearPendingImage);
+
+// ===== Drag-and-drop file gambar dari file explorer ke seluruh chat panel =====
+const chatPanelEl = document.querySelector(".chat-panel");
+let dragDepth = 0; // hitung enter/leave biar highlight gak kedip pas drag di atas elemen anak
+chatPanelEl.addEventListener("dragenter", (e) => {
+  e.preventDefault();
+  dragDepth++;
+  chatPanelEl.classList.add("drag-over");
+});
+chatPanelEl.addEventListener("dragover", (e) => {
+  e.preventDefault(); // wajib, biar event "drop" kepanggil
+});
+chatPanelEl.addEventListener("dragleave", (e) => {
+  e.preventDefault();
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) chatPanelEl.classList.remove("drag-over");
+});
+chatPanelEl.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dragDepth = 0;
+  chatPanelEl.classList.remove("drag-over");
+  const files = e.dataTransfer && e.dataTransfer.files;
+  if (files && files.length) addImageFiles(files);
+});
+
+// ===== Quick Action Chips — klik langsung isi input & kirim =====
+document.querySelectorAll("#chipRow .chip").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const prompt = btn.dataset.prompt || btn.textContent;
+    document.getElementById("chatInput").value = prompt;
+    document.getElementById("sendBtn").click();
+  });
+});
 
 document.getElementById("sendBtn").addEventListener("click", () => {
   const input = document.getElementById("chatInput");
   const q = input.value.trim();
-  if (!q && !pendingImageDataUrl) return; // minimal harus ada teks ATAU gambar
+  if (!q && !pendingImages.length) return; // minimal harus ada teks ATAU gambar
   input.value = "";
-  const img = pendingImageDataUrl;
-  clearPendingImage();
-  askAgent(q, img);
+  const imgs = pendingImages.slice();
+  clearPendingImages();
+  askAgent(q, imgs);
 });
 document.getElementById("chatInput").addEventListener("keydown", (e) => {
   if (e.key === "Enter") document.getElementById("sendBtn").click();
@@ -892,9 +1156,71 @@ if (window.firebase && firebase.auth){
   }catch(e){ console.warn("Firebase auth belum siap:", e.message); }
 }
 
+// ===== Persistent Chat Session (Anti-Hilang) =====
+// Nyimpen chatHistory ke localStorage BROWSER INI tiap ada pesan baru, biar
+// kalau tab ke-refresh/ke-tutup gak sengaja pas lagi nyusun report, obrolannya
+// gak ilang. CATATAN: ini cuma lokal per-browser/device (bukan sync lewat
+// Firebase) — ganti browser/device ya obrolan lama emang gak ikut kebawa.
+const CHAT_STORAGE_KEY = "odysseyChatHistory_v1";
+const CHAT_STORAGE_MAX_MESSAGES = 40; // batasin biar localStorage (~5-10MB) gak gampang penuh
+
+// Gambar base64 di content vision-message bisa ratusan KB per gambar — kalau
+// disimpen mentah-mentah ke localStorage gampang banget kena "quota exceeded"
+// abis beberapa kali attach gambar. Jadi pas SIMPAN, part gambar diganti
+// placeholder teks (gambar aslinya emang udah gak kepake lagi abis di-refresh,
+// yang penting jejak percakapannya masih kebaca).
+function sanitizeContentForStorage(content){
+  if (!Array.isArray(content)) return content;
+  return content.map(part => (part && part.type === "image_url")
+    ? { type:"text", text:"[gambar terlampir — gak ke-simpen ulang abis refresh]" }
+    : part);
+}
+function saveChatHistory(){
+  try{
+    const trimmed = chatHistory.slice(-CHAT_STORAGE_MAX_MESSAGES);
+    const sanitized = trimmed.map(m => ({ role:m.role, content: sanitizeContentForStorage(m.content) }));
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(sanitized));
+  }catch(e){
+    console.warn("Gagal nyimpen riwayat chat ke localStorage:", e.message);
+  }
+}
+// content chatHistory bisa string biasa ATAU array part vision (text+image) —
+// dua-duanya diratain jadi teks polos buat ditampilin ulang di bubble.
+function contentToDisplayText(content){
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return content.map(p => (p && p.type === "text") ? p.text : "").join(" ").trim();
+  return "";
+}
+// Return true kalau ada riwayat yang berhasil di-restore & di-render.
+function restoreChatHistory(){
+  let saved = null;
+  try{
+    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+    saved = raw ? JSON.parse(raw) : null;
+  }catch(e){
+    console.warn("Gagal baca riwayat chat dari localStorage:", e.message);
+  }
+  if (!saved || !Array.isArray(saved) || !saved.length) return false;
+  chatHistory = saved;
+  saved.forEach(m => addMessage(m.role === "assistant" ? "agent" : "user", contentToDisplayText(m.content)));
+  return true;
+}
+function clearChatHistory(){
+  chatHistory = [];
+  try{ localStorage.removeItem(CHAT_STORAGE_KEY); }catch(e){ /* abaikan */ }
+  document.getElementById("chatLog").innerHTML = "";
+  addMessage("agent", "Riwayat obrolan di-reset bro, mulai dari sini ya.");
+}
+document.getElementById("clearChatBtn").addEventListener("click", clearChatHistory);
+
 (async function init(){
+  const hadHistory = restoreChatHistory();
   await loadData();
-  addMessage("agent", "Halo, gua Odyssey AI Agent buat mantau Seluruh operasional & Daily Reporting Palangka Raya DC\"");
+  // Sapaan pembuka cuma muncul kalau ini SESI BARU (belum ada riwayat
+  // ke-restore) — biar gak dobel nongol tiap kali halaman di-refresh.
+  if (!hadHistory){
+    addMessage("agent", "Halo, gua Odyssey AI Agent buat mantau Seluruh operasional & Daily Reporting Palangka Raya DC\"");
+  }
 })();
 </script>
 </body>
