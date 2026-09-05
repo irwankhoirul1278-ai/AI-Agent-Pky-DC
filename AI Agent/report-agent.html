@@ -159,14 +159,22 @@
 
   <header>
     <div>
-      <div class="title">The <span>Odyssey</span></div>
+      <div class="title" style="font-size:32px;">The <span>Odyssey</span></div>
     </div>
-    <div class="sub" id="statusLine">mode: mock data</div>
+    <div class="sub" id="statusLine" style="display:none;">mode: mock data</div>
   </header>
 
   <div class="topbar">
-    <span class="stat" id="quickStat"><b>0</b> trip tercatat</span>
+    <span class="stat" id="quickStat" style="display:none;"><b>0</b> trip tercatat</span>
     <div class="spacer"></div>
+    <label for="modelSelect" style="color:var(--muted); font-size:12px;">Model:</label>
+    <select id="modelSelect" class="mono" style="background:var(--panel-2); border:1px solid var(--line); color:var(--text); padding:5px 8px; border-radius:6px; font-size:12px;">
+      <option value="">Auto (fallback otomatis)</option>
+      <option value="gemini-3.6-flash">3.6 Flash</option>
+      <option value="antigravity-preview-05-2026">Antigravity</option>
+      <option value="gemini-3.1-flash-lite">3.1 Flash Lite</option>
+      <option value="gemini-3.5-flash-lite">3.5 Flash Lite</option>
+    </select>
     <button class="icon-btn" id="refreshBtn">Refresh Data</button>
   </div>
 
@@ -181,7 +189,7 @@
         <span class="hint">Gambar siap dikirim — tambahin pertanyaan (opsional) lalu Kirim</span>
       </div>
       <div class="chat-input-inner">
-        <input id="chatInput" type="text" placeholder='Tanya AI Agent...'>
+        <input id="chatInput" type="text" placeholder='Tanya Odyssey... '>
         <button id="sendBtn">Kirim</button>
       </div>
     </div>
@@ -193,6 +201,16 @@
 <script>
 const FB_ROOT = "prDcInboundTracking";
 const LH_PATH = FB_ROOT + "/lhTracking";
+
+// Label singkat buat ditampilin di UI — sengaja gak pake kata "Gemini" biar
+// ringkas, harus tetep sinkron sama value <option> di dropdown #modelSelect
+// dan sama GEMINI_MODEL_CHAIN di gemini-proxy.js.
+const MODEL_LABELS = {
+  "gemini-3.6-flash": "3.6 Flash",
+  "antigravity-preview-05-2026": "Antigravity",
+  "gemini-3.1-flash-lite": "3.1 Flash Lite",
+  "gemini-3.5-flash-lite": "3.5 Flash Lite"
+};
 
 let currentTrips = [];
 let chatHistory = []; // {role:'user'|'assistant', content:'...'}
@@ -433,9 +451,9 @@ function simplifyErrorMessage(raw){
       const retryAt = new Date(Date.now() + waitSeconds * 1000);
       const hh = String(retryAt.getHours()).padStart(2,"0");
       const mm = String(retryAt.getMinutes()).padStart(2,"0");
-      return `Anda telah melebihi limit penggunaan AI Agent. Mohon gunakan kembali pada jam ${hh}:${mm} WIB ya bro.`;
+      return `Anda telah melebihi limit penggunaan AI Agent bro (SEMUA model cadangan juga udah abis jatahnya). Mohon gunakan kembali pada jam ${hh}:${mm} WIB ya.`;
     }
-    return "Anda telah melebihi limit penggunaan AI Agent bro. Mohon tunggu sekitar 1 menit lalu coba lagi ya.";
+    return "Anda telah melebihi limit penggunaan AI Agent bro (SEMUA model cadangan juga udah abis jatahnya). Mohon tunggu sekitar 1 menit lalu coba lagi ya.";
   }
 
   // Model gak ketemu/gak bisa diakses, atau kena filter safety Gemini
@@ -702,6 +720,10 @@ Contoh buat jawaban singkat 1 baris, "replyLines" tetap array isi 1 item, misal:
       // AI ke-distract & jawabannya asal gara-gara "minimal" kekurangan mikir).
       // Obrolan santai tetep "minimal" biar hemat token/latency.
       thinking_level: isDataQuery ? "low" : "minimal",
+      // Toggle "Model" di topbar — kalau user pilih model spesifik (bukan
+      // "Auto"), ini dikirim ke proxy buat dicoba PALING DEPAN (fallback ke
+      // sisa daftar tetep jalan kalau model pilihan itu kena limit).
+      preferred_model: document.getElementById("modelSelect").value || undefined,
       system: systemPrompt,
       contents: contentsForApi
     };
@@ -726,6 +748,14 @@ Contoh buat jawaban singkat 1 baris, "replyLines" tetap array isi 1 item, misal:
     const candidate = (data.candidates && data.candidates[0]) || null;
     if (!candidate && data.promptFeedback && data.promptFeedback.blockReason){
       throw new Error("blockReason: " + data.promptFeedback.blockReason);
+    }
+    // Kasih tau di status line model MANA yang beneran ngejawab — kalau toggle
+    // di-set ke model tertentu tapi ternyata itu kena limit, proxy otomatis
+    // fallback ke model lain, jadi ini bisa beda dari pilihan di dropdown.
+    if (data._modelUsed){
+      const label = MODEL_LABELS[data._modelUsed] || data._modelUsed;
+      const base = document.getElementById("statusLine").textContent.split(" · model:")[0];
+      document.getElementById("statusLine").textContent = base + " · model: " + label;
     }
     const partsText = candidate && candidate.content && Array.isArray(candidate.content.parts)
       ? candidate.content.parts.map(p => (p && p.text) || "").join("")
@@ -864,7 +894,7 @@ if (window.firebase && firebase.auth){
 
 (async function init(){
   await loadData();
-  addMessage("agent", "Halo bro, gua AI Agent buat mantau trip Inbound hari ini. Tanya aja, misal \"ada yang Late Arrival hari ini?\" atau \"yang paling lama durasinya berapa?\"");
+  addMessage("agent", "Halo, gua Odyssey AI Agent buat mantau Seluruh operasional & Daily Reporting Palangka Raya DC\"");
 })();
 </script>
 </body>
