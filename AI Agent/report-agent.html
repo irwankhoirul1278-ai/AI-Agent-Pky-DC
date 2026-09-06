@@ -71,6 +71,13 @@
     border:1px solid var(--line); border-radius:var(--radius); overflow:hidden;
   }
   #chatLog{flex:1; overflow-y:auto; padding:18px; display:flex; flex-direction:column; gap:12px;}
+  /* Scrollbar chat dibikin tipis & nyatu sama tema gelap, bukan scrollbar
+     tebal default browser yang norak nongol di kanan. */
+  #chatLog{scrollbar-width:thin; scrollbar-color:var(--line) transparent;}
+  #chatLog::-webkit-scrollbar{width:6px;}
+  #chatLog::-webkit-scrollbar-track{background:transparent;}
+  #chatLog::-webkit-scrollbar-thumb{background:var(--line); border-radius:10px;}
+  #chatLog::-webkit-scrollbar-thumb:hover{background:var(--muted);}
 
   .msg{max-width:min(78%, 720px); display:flex; flex-direction:column; gap:6px;}
   .msg.user{align-self:flex-end; align-items:flex-end;}
@@ -638,12 +645,12 @@ Late/Early Arrival Issue's
 (tulis tanggal yang relevan di sini, format DD/MM/YYYY)
 <baris kosong>
 1. LT Number : (isi tripNum)
-          Vendor : (isi vendorName)
-          Driver : (isi driver)
-          Qty Parcel : (isi qtyParcelVal)
-          STA : (isi staDest, format jam di atas)
-          ATA : (isi ataDest, format jam di atas — kalau belum ada tulis "-")
-          Travel Time : (isi durasi tempuh, format "Xh Ym")
+   Vendor : (isi vendorName)
+   Driver : (isi driver)
+   Qty Parcel : (isi qtyParcelVal)
+   STA : (isi staDest, format jam di atas)
+   ATA : (isi ataDest, format jam di atas — kalau belum ada tulis "-")
+   Travel Time : (isi durasi tempuh, format "Xh Ym")
 <baris kosong>
 2. LT Number : ...dst, angka urut lanjut buat tiap trip berikutnya, dengan struktur field yang SAMA PERSIS.
 
