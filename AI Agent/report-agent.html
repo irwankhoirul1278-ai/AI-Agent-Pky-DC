@@ -373,10 +373,34 @@ function formatDateYYYYMMDDLocal(d){
   return d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate());
 }
 
+// Sama alasannya kayak formatDateYYYYMMDDLocal di atas: field ISO dari Firebase
+// itu HASIL .toISOString() pas disimpen (jadi PUNYA "Z"/UTC beneran, bukan cuma
+// format teknis kosongan) — sempet ada bug AI Agent baca digit MENTAH dari
+// string ISO itu (abaikan "Z") pas nulis STA/ATA di report, hasilnya jawabannya
+// telat 7 jam terus dari yang ditampilin di dashboard Inbound (WIB = UTC+7).
+// Makanya sekarang jam/tanggal buat ditampilin ke user diformat DI SINI (JS),
+// pakai getHours()/getDate()/dst dari Date object — otomatis udah dikonversi
+// bener ke jam lokal browser (WIB) gak peduli field aslinya ada "Z" atau
+// nggak — AI tinggal COPY hasil jadi ini, gak perlu ngitung/convert sendiri.
+function formatDateTimeLocal(iso){
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d)) return null;
+  const pad = n => String(n).padStart(2, "0");
+  return pad(d.getDate()) + "/" + pad(d.getMonth()+1) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes()) + " WIB";
+}
+function formatDurationHM(ms){
+  if (ms == null || isNaN(ms) || ms < 0) return null;
+  const totalMin = Math.round(ms / 60000);
+  return Math.floor(totalMin / 60) + "h " + (totalMin % 60) + "m";
+}
+
 function normalizeTrip(t){
   const { statusText, etaDateObj } = computeStatus(t);
   const dateSourceRaw = t.atdOrigin || t.stdOrigin;
   const dateSource = dateSourceRaw ? new Date(dateSourceRaw) : null;
+  const atdOriginD = t.atdOrigin ? new Date(t.atdOrigin) : null;
+  const ataDestD = t.ataDest ? new Date(t.ataDest) : null;
   return {
     tripNum: t.tripNum || "-",
     routeName: t.routeName || "-",
@@ -390,6 +414,16 @@ function normalizeTrip(t){
     atdOrigin: t.atdOrigin || null,
     ataDest: t.ataDest || null,
     etaDest: etaDateObj ? etaDateObj.toISOString() : null,
+    // Versi SUDAH DIFORMAT (jam lokal WIB, siap pakai) — INI yang wajib dipakai
+    // AI Agent buat nulis ke user, BUKAN staDest/ataDest/atdOrigin/stdOrigin
+    // mentahnya (itu dibiarin ada di sini cuma buat kebutuhan sortir tanggal).
+    stdOriginFmt: formatDateTimeLocal(t.stdOrigin),
+    staDestFmt: formatDateTimeLocal(t.staDest),
+    atdOriginFmt: formatDateTimeLocal(t.atdOrigin),
+    ataDestFmt: formatDateTimeLocal(t.ataDest),
+    travelTimeFmt: (atdOriginD && ataDestD && !isNaN(atdOriginD) && !isNaN(ataDestD))
+      ? formatDurationHM(ataDestD.getTime() - atdOriginD.getTime())
+      : null,
     tanggal: dateSource && !isNaN(dateSource) ? formatDateYYYYMMDDLocal(dateSource) : null,
     status: statusText
   };
@@ -747,10 +781,14 @@ atdOrigin ke ataDest lebih dari 6.5 jam (atau ETA 6.5 jam dari atdOrigin udah le
 "Early Arrived" = durasi tempuh kurang dari 6 jam. "On Time" = 6-6.5 jam. "In Transit" = masih di jalan,
 ETA belum lewat.
 
-Format WAJIB buat semua jam/tanggal yang kamu tulis (STA, ETA, waktu berangkat/tiba, dll):
-tulis dalam format "DD/MM HH:mm WIB" yang gampang dibaca manusia (contoh: "05/09 07:30 WIB"), AMBIL DARI
-JAM LOKAL field ISO yang ada (abaikan huruf "T" dan "Z" serta angka detik/milidetik-nya, itu cuma format
-teknis, JANGAN pernah ditulis mentah-mentah ke user).
+Format jam/tanggal: field JSON di bawah UDAH DISERTAIN versi siap-pakai buat tiap timestamp — "stdOriginFmt",
+"staDestFmt", "atdOriginFmt", "ataDestFmt" (format "DD/MM HH:mm WIB"), dan "travelTimeFmt" (format "Xh Ym").
+WAJIB PAKAI field *Fmt / travelTimeFmt ini APA ADANYA (copy persis) buat nulis STA/ATA/waktu di jawaban —
+JANGAN baca/hitung/convert sendiri dari field mentahnya (staDest/ataDest/atdOrigin/stdOrigin, yang masih
+ada di JSON cuma buat kebutuhan sortir tanggal, BUKAN buat ditulis atau dihitung ulang jadi jam). Field
+mentah itu ISO UTC asli (ada offset tersembunyi ke WIB), kalau kamu baca/hitung manual dari situ hasilnya
+BAKAL MELESET beberapa jam — makanya udah disediain versi jadi yang tinggal dipakai. Kalau field *Fmt-nya
+null (belum ada datanya), tulis "-".
 
 TEMPLATE WAJIB kalau user minta "Report" / "Laporan" Late Arrival dan/atau Early Arrival (ikuti PERSIS,
 teks polos TANPA tanda bintang atau simbol markdown apa pun, tiap baris di bawah = 1 item terpisah di
@@ -763,9 +801,9 @@ Late/Early Arrival Issue's
    Vendor : (isi vendorName)
    Driver : (isi driver)
    Qty Parcel : (isi qtyParcelVal)
-   STA : (isi staDest, format jam di atas)
-   ATA : (isi ataDest, format jam di atas — kalau belum ada tulis "-")
-   Travel Time : (isi durasi tempuh, format "Xh Ym")
+   STA : (isi staDestFmt apa adanya — JANGAN dari staDest mentah)
+   ATA : (isi ataDestFmt apa adanya — kalau null tulis "-" — JANGAN dari ataDest mentah)
+   Travel Time : (isi travelTimeFmt apa adanya — JANGAN dihitung ulang)
 <baris kosong>
 2. LT Number : ...dst, angka urut lanjut buat tiap trip berikutnya, dengan struktur field yang SAMA PERSIS.
 
