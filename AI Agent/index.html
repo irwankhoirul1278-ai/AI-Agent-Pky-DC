@@ -151,6 +151,12 @@
      iframe itu lagi ada di dalam .frames (tampilan tab penuh). */
   .odyssey-popup-body { flex: 1; min-height: 0; position: relative; }
   .odyssey-popup-body iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; display: block; }
+  /* Pas lagi nge-drag handle resize, iframe DIMATIIN sementara pointer-nya —
+     kalau enggak, begitu kursor mouse lewat di atas iframe pas drag, event
+     mousemove-nya kesedot masuk ke document iframe (browsing context beda),
+     bukan ke window luar yang lagi ngitung resize-nya, jadi macet di tengah
+     jalan begitu kursor nyentuh area iframe. */
+  .odyssey-popup.resizing .odyssey-popup-body iframe { pointer-events: none; }
 </style>
 </head>
 <body>
@@ -463,6 +469,7 @@
     }
     function onDown(e) {
       resizing = true;
+      popup.classList.add("resizing");
       var rect = popup.getBoundingClientRect();
       var p = pointerXY(e);
       startX = p.x; startY = p.y; startW = rect.width; startH = rect.height;
@@ -480,6 +487,7 @@
     }
     function onUp() {
       resizing = false;
+      popup.classList.remove("resizing");
     }
 
     handle.addEventListener("mousedown", onDown);
