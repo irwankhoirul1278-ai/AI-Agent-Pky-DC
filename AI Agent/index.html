@@ -115,10 +115,12 @@
   .odyssey-popup {
     position: fixed; right: 20px; bottom: 88px; z-index: 9998;
     width: 380px; height: 600px;
+    min-width: 300px; min-height: 340px;
     max-width: calc(100vw - 24px); max-height: calc(100vh - 112px);
     background: #0b1329; border: 1px solid #1e293b; border-radius: 14px;
     box-shadow: 0 12px 40px rgba(0,0,0,.5); overflow: hidden;
     display: none; flex-direction: column;
+    resize: both;
   }
   .odyssey-popup.show { display: flex; }
   .odyssey-popup-head {
