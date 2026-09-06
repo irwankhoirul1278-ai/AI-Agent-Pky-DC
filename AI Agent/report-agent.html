@@ -174,13 +174,13 @@
 <body>
 <div class="wrap">
 
-  <header>
-    <div>
-      <div class="title">The <span>Odyssey</span></div>
-      <div class="sub">Hallo saya Odyssey, tugas saya disini adalah untuk membantumu dalam melakukan Track Unit yang Late Arrival & Early Arrival serta menyiapkan Report secara langsung ke CL/PL</div>
-    </div>
-    <div class="sub" id="statusLine">mode: mock data</div>
-  </header>
+  <!-- Header "The Odyssey" DIHAPUS dari sini — judulnya sekarang cuma
+       ditampilin sekali di title bar popup (index.html), biar area di bawah
+       ini (topbar Refresh Data + chat-panel) bisa FULL kepake buat
+       percakapan, gak keulang 2x. #statusLine ("mode: mock data") masih
+       dipertahanin di script bawah lewat elemen tersembunyi biar kode JS
+       yang nulis ke situ (kalau ada) gak error karena elemen ilang. -->
+  <div class="sub" id="statusLine" style="display:none;">mode: mock data</div>
 
   <div class="topbar">
     <span class="stat" id="quickStat"><b>0</b> trip tercatat</span>
