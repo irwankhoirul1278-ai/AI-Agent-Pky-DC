@@ -123,6 +123,16 @@
   .chat-input-row{
     display:flex; flex-direction:column; gap:8px; padding:12px; border-top:1px solid var(--line); background:var(--panel);
   }
+  .model-select-row{display:flex; justify-content:flex-end;}
+  .model-select{
+    appearance:none; -webkit-appearance:none; -moz-appearance:none;
+    background-color:var(--panel-2); color:var(--muted); border:1px solid var(--line);
+    border-radius:20px; padding:5px 26px 5px 12px; font-size:11px; font-family:inherit;
+    cursor:pointer; max-width:100%;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a93a1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+    background-repeat:no-repeat; background-position:right 8px center; background-size:12px;
+  }
+  .model-select:focus{outline:none; border-color:var(--amber); color:var(--text);}
   .chat-input-inner{display:flex; gap:8px;}
   .chat-input-inner input{
     flex:1; background:var(--panel-2); border:1px solid var(--line); color:var(--text);
@@ -174,6 +184,14 @@
   <div class="chat-panel">
     <div id="chatLog"></div>
     <div class="chat-input-row">
+      <div class="model-select-row">
+        <select id="modelSelect" class="model-select" title="Pilih model AI">
+          <option value="">Auto</option>
+          <option value="gemini-3.6-flash">Odyssey 3.6 Flash</option>
+          <option value="gemini-3.1-flash-lite">Odyssey 3.1 Flash Lite</option>
+          <option value="gemini-3.5-flash-lite">Odyssey 3.5 Flash Lite</option>
+        </select>
+      </div>
       <div class="img-preview-row" id="imgPreviewRow">
         <div class="thumb-wrap">
           <img id="imgPreviewThumb" src="" alt="preview">
@@ -620,12 +638,12 @@ Late/Early Arrival Issue's
 (tulis tanggal yang relevan di sini, format DD/MM/YYYY)
 <baris kosong>
 1. LT Number : (isi tripNum)
-   Vendor : (isi vendorName)
-   Driver : (isi driver)
-   Qty Parcel : (isi qtyParcelVal)
-   STA : (isi staDest, format jam di atas)
-   ATA : (isi ataDest, format jam di atas — kalau belum ada tulis "-")
-   Travel Time : (isi durasi tempuh, format "Xh Ym")
+          Vendor : (isi vendorName)
+          Driver : (isi driver)
+          Qty Parcel : (isi qtyParcelVal)
+          STA : (isi staDest, format jam di atas)
+          ATA : (isi ataDest, format jam di atas — kalau belum ada tulis "-")
+          Travel Time : (isi durasi tempuh, format "Xh Ym")
 <baris kosong>
 2. LT Number : ...dst, angka urut lanjut buat tiap trip berikutnya, dengan struktur field yang SAMA PERSIS.
 
@@ -675,8 +693,13 @@ Contoh buat jawaban singkat 1 baris, "replyLines" tetap array isi 1 item, misal:
     // Panggil lewat Netlify Function proxy (bukan langsung ke Gemini) supaya
     // API key gak pernah ke-expose di browser. Lihat netlify/functions/gemini-proxy.js
     // Model (termasuk dukungan vision buat gambar) udah ditentuin di sisi proxy
-    // (constant GEMINI_MODEL) — model Gemini flash-nya udah multimodal jadi gak
-    // perlu ganti model/parameter khusus kalau ada gambar terlampir.
+    // (GEMINI_MODEL_CHAIN) — model Gemini flash-nya udah multimodal jadi gak
+    // perlu ganti model/parameter khusus kalau ada gambar terlampir. Kalau
+    // user milih model tertentu di dropdown (bukan "Auto"), kirim sebagai
+    // preferred_model — proxy bakal nyoba model itu duluan, tapi tetep
+    // fallback ke chain default kalau model itu kena rate limit.
+    const modelSelectEl = document.getElementById("modelSelect");
+    const preferredModel = modelSelectEl ? modelSelectEl.value : "";
     const requestBody = {
       max_tokens: isDataQuery ? 3000 : 1500, // mode report dikasih jatah lebih gede
       // Level thinking: mode data (trip JSON / DW report) butuh AI teliti nyisir
@@ -688,6 +711,7 @@ Contoh buat jawaban singkat 1 baris, "replyLines" tetap array isi 1 item, misal:
       system: systemPrompt,
       contents: contentsForApi
     };
+    if (preferredModel) requestBody.preferred_model = preferredModel;
     const response = await fetch("/.netlify/functions/gemini-proxy", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
