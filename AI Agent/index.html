@@ -120,9 +120,20 @@
     background: #0b1329; border: 1px solid #1e293b; border-radius: 14px;
     box-shadow: 0 12px 40px rgba(0,0,0,.5); overflow: hidden;
     display: none; flex-direction: column;
-    resize: both;
   }
   .odyssey-popup.show { display: flex; }
+  /* Handle resize custom — WAJIB elemen terpisah di atas iframe (bukan pakai
+     CSS resize:both bawaan), karena iframe di dalam .odyssey-popup-body
+     nutupin seluruh area kotak termasuk pojoknya, jadi grip resize bawaan
+     browser gak pernah kena klik (ketutup iframe duluan). */
+  .odyssey-resize-handle {
+    position: absolute; right: 0; bottom: 0; width: 20px; height: 20px;
+    z-index: 20; cursor: nwse-resize; touch-action: none;
+    background:
+      linear-gradient(135deg, transparent 0 50%, rgba(148,163,184,.6) 50% 58%, transparent 58% 100%),
+      linear-gradient(135deg, transparent 0 70%, rgba(148,163,184,.6) 70% 78%, transparent 78% 100%);
+    border-bottom-right-radius: 14px;
+  }
   .odyssey-popup-head {
     flex-shrink: 0; height: 40px; display: flex; align-items: center; justify-content: space-between;
     padding: 0 6px 0 12px; background: #131c33; border-bottom: 1px solid #1e293b;
@@ -188,6 +199,7 @@
     </div>
   </div>
   <div class="odyssey-popup-body" id="odysseyPopupBody"></div>
+  <div class="odyssey-resize-handle" id="odysseyResizeHandle" title="Tarik untuk resize"></div>
 </div>
 
 <script src="auth-guard.js"></script>
@@ -429,6 +441,53 @@
       var rect = fab.getBoundingClientRect();
       if (rect.left && rect.top) savePos(applyPos(rect.left, rect.top));
     });
+  })();
+
+  // ===== Resize manual panel popup Odyssey lewat handle custom di pojok =====
+  // (BUKAN pakai CSS resize:both bawaan browser — itu gagal kepencet karena
+  // iframe di dalam popup-body nutupin seluruh kotak sampai ke pojoknya.
+  // Handle ini elemen terpisah dengan z-index lebih tinggi dari iframe, jadi
+  // klik-tariknya selalu kena duluan sebelum nyentuh iframe di bawahnya.)
+  // Popup posisinya fixed pakai right/bottom (bukan left/top), jadi pas
+  // dibesarin, kotaknya nambah ke arah kiri-atas — anchor kanan-bawahnya
+  // (deket FAB) tetap diem di tempat.
+  (function setupOdysseyPopupResize() {
+    var popup = document.getElementById("odysseyPopup");
+    var handle = document.getElementById("odysseyResizeHandle");
+    if (!popup || !handle) return;
+    var resizing = false, startX = 0, startY = 0, startW = 0, startH = 0;
+
+    function pointerXY(e) {
+      var p = (e.touches && e.touches[0]) || e;
+      return { x: p.clientX, y: p.clientY };
+    }
+    function onDown(e) {
+      resizing = true;
+      var rect = popup.getBoundingClientRect();
+      var p = pointerXY(e);
+      startX = p.x; startY = p.y; startW = rect.width; startH = rect.height;
+      if (e.cancelable) e.preventDefault();
+    }
+    function onMove(e) {
+      if (!resizing) return;
+      if (e.cancelable) e.preventDefault();
+      var p = pointerXY(e);
+      var dx = p.x - startX, dy = p.y - startY;
+      // min-width/min-height/max-width/max-height di CSS otomatis nge-clamp
+      // hasilnya walau kita set inline style width/height langsung di sini.
+      popup.style.width = (startW + dx) + "px";
+      popup.style.height = (startH + dy) + "px";
+    }
+    function onUp() {
+      resizing = false;
+    }
+
+    handle.addEventListener("mousedown", onDown);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    handle.addEventListener("touchstart", onDown, { passive: false });
+    window.addEventListener("touchmove", onMove, { passive: false });
+    window.addEventListener("touchend", onUp);
   })();
 </script>
 
