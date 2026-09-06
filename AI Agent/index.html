@@ -80,6 +80,47 @@
     border: none; display: none;
   }
   .frames iframe.active { display: block; }
+
+  /* ===== Floating Button "Odyssey" — bisa di-drag, muncul di ATAS SEMUA tab ===== */
+  .odyssey-fab {
+    position: fixed; right: 20px; bottom: 20px; z-index: 9999;
+    width: 52px; height: 52px; border-radius: 50%; border: none;
+    background: linear-gradient(135deg, #e67e22, #ee2f6f); color: #fff;
+    font-size: 22px; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 6px 18px rgba(0,0,0,.35); cursor: grab; touch-action: none;
+    user-select: none; transition: transform .15s;
+  }
+  .odyssey-fab:hover { transform: scale(1.06); }
+  .odyssey-fab.dragging { cursor: grabbing; transition: none; }
+  .odyssey-fab.odyssey-hidden { display: none; }
+
+  /* ===== Panel Popup Chat — muncul begitu FAB diklik (bukan di-drag) ===== */
+  .odyssey-popup {
+    position: fixed; right: 20px; bottom: 88px; z-index: 9998;
+    width: 380px; height: 600px;
+    max-width: calc(100vw - 24px); max-height: calc(100vh - 112px);
+    background: #0b1329; border: 1px solid #1e293b; border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.5); overflow: hidden;
+    display: none; flex-direction: column;
+  }
+  .odyssey-popup.show { display: flex; }
+  .odyssey-popup-head {
+    flex-shrink: 0; height: 40px; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 6px 0 12px; background: #131c33; border-bottom: 1px solid #1e293b;
+    color: #f1f5f9; font-weight: 700; font-size: 12.5px;
+  }
+  .odyssey-popup-head-actions { display: flex; gap: 2px; }
+  .odyssey-popup-head-actions button {
+    background: transparent; border: none; color: #94a3b8; font-size: 14px; cursor: pointer;
+    width: 26px; height: 26px; border-radius: 6px;
+  }
+  .odyssey-popup-head-actions button:hover { background: rgba(255,255,255,.08); color: #f1f5f9; }
+  /* Iframe Odyssey pindah KE SINI pas popup dibuka (node yang SAMA, dipindah
+     lewat appendChild — bukan di-reload/dibikin baru) — makanya perlu aturan
+     ukuran sendiri, terpisah dari ".frames iframe" yang cuma berlaku pas
+     iframe itu lagi ada di dalam .frames (tampilan tab penuh). */
+  .odyssey-popup-body { flex: 1; min-height: 0; position: relative; }
+  .odyssey-popup-body iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; display: block; }
 </style>
 </head>
 <body>
@@ -96,7 +137,7 @@
     <div class="topnav-spacer"></div>
     <button class="logout-btn" onclick="logoutApp()">↩ Keluar</button>
   </div>
-  <div class="frames">
+  <div class="frames" id="frames">
     <iframe id="iframeRestTime" data-src="rest-time.html" title="Rest Time Monitoring"></iframe>
     <iframe id="iframePerformanceBagger" data-src="performance-bagger.html" title="Performance Bagger"></iframe>
     <iframe id="iframeInbound" data-src="inbound.html" title="Inbound"></iframe>
@@ -104,6 +145,24 @@
     <iframe id="iframeOutbound" data-src="outbound.html" title="Outbound Monitoring"></iframe>
     <iframe id="iframeInventoryControl" data-src="inventory-control.html" title="Inventory Control"></iframe>
   </div>
+</div>
+
+<!-- ===== Floating Odyssey Widget — di luar .shell biar posisi fixed-nya gak -->
+<!-- kesangkut sama overflow:hidden manapun. Iframe #iframeOdyssey ASLI-nya -->
+<!-- tetep hidup di dalam .frames (tab biasa); begitu FAB diklik, node iframe -->
+<!-- itu (BUKAN salinan/reload) dipindah ke #odysseyPopupBody, terus dipindah -->
+<!-- balik ke #frames pas popup ditutup. Sesi chat/Firebase listener-nya -->
+<!-- gak pernah putus karena cuma dipindah posisi DOM-nya doang. -->
+<button type="button" class="odyssey-fab odyssey-hidden" id="odysseyFab" title="Chat sama Odyssey">🤖</button>
+<div class="odyssey-popup" id="odysseyPopup">
+  <div class="odyssey-popup-head">
+    <span>🤖 Odyssey</span>
+    <div class="odyssey-popup-head-actions">
+      <button type="button" id="odysseyExpandBtn" title="Buka tampilan penuh">⛶</button>
+      <button type="button" id="odysseyPopupCloseBtn" title="Tutup">✕</button>
+    </div>
+  </div>
+  <div class="odyssey-popup-body" id="odysseyPopupBody"></div>
 </div>
 
 <script src="auth-guard.js"></script>
@@ -139,6 +198,11 @@
       if (allowed && !iframe.src) iframe.src = iframe.dataset.src;
     });
 
+    // FAB Odyssey cuma boleh nongol kalau emailnya emang diizinin akses tab
+    // "odyssey" (ACCESS_MAP di auth-guard.js) — SAMA PERSIS aturan yang
+    // nentuin tombol tab-nya keliatan atau enggak, cuma beda wadah doang.
+    odysseyAllowed = allowedTabs.indexOf("odyssey") !== -1;
+
     // Default tab: yang pertama diizinkan (biasanya "rest-time" kalau full akses,
     // tapi buat email terbatas ini otomatis loncat ke tab yang emang boleh dia liat).
     var defaultTab = allowedTabs[0];
@@ -169,11 +233,19 @@
 
   function showTab(tab, submenu) {
     if (!TABS[tab]) return;
+    // Kalau lagi buka POPUP Odyssey terus user pindah ke tab "odyssey" (baik
+    // lewat tombol topnav ATAU tombol "buka tampilan penuh" di popup), iframe-
+    // nya musti dipindah balik ke .frames dulu biar toggle .active di bawah
+    // ini beneran nampilin dia sebagai tab penuh (bukan nyangkut di popup).
+    if (tab === "odyssey" && odysseyPopupOpen) closeOdysseyPopup();
+
     Object.keys(TABS).forEach(function (key) {
       var isActive = key === tab;
       document.getElementById(TABS[key].iframe).classList.toggle("active", isActive);
       document.getElementById(TABS[key].btn).classList.toggle("active", isActive);
     });
+
+    updateOdysseyFabVisibility(tab);
 
     if (submenu && tabReady.hasOwnProperty(tab)) {
       if (tabReady[tab]) sendSubmenu(tab, submenu);
@@ -198,6 +270,141 @@
       showTab(data.tab, data.submenu);
     }
   });
+
+  // ===== Floating Odyssey Widget =====
+  // Prinsip inti: HANYA ADA SATU iframe Odyssey (#iframeOdyssey) di seluruh
+  // halaman. Node yang sama itu dipindah-pindah antara 2 "wadah" pakai
+  // appendChild (BUKAN dibikin ulang/reload):
+  //   - #frames         → mode tab penuh (perilaku ASLI, gak berubah)
+  //   - #odysseyPopupBody → mode popup mengambang (BARU)
+  // Karena appendChild cuma mindah node yang udah ada (bukan hapus lalu bikin
+  // baru), sesi chat yang lagi jalan (chatHistory di memori, listener Firebase,
+  // dll di dalam report-agent.html) TETEP HIDUP walau dipindah bolak-balik.
+  var odysseyAllowed = false; // di-set true di authReady kalau tab "odyssey" diizinin
+  var odysseyPopupOpen = false;
+
+  function updateOdysseyFabVisibility(activeTab) {
+    var fab = document.getElementById("odysseyFab");
+    if (!fab) return;
+    // FAB disembunyiin kalau: (a) emailnya emang gak diizinin akses Odyssey
+    // sama sekali, ATAU (b) user LAGI di tab Odyssey penuh (redundan, chat-nya
+    // udah keliatan gede di layar, gak perlu tombol mengambang lagi).
+    var shouldShow = odysseyAllowed && activeTab !== "odyssey";
+    fab.classList.toggle("odyssey-hidden", !shouldShow);
+  }
+
+  function openOdysseyPopup() {
+    if (odysseyPopupOpen || !odysseyAllowed) return;
+    odysseyPopupOpen = true;
+    document.getElementById("odysseyPopupBody").appendChild(document.getElementById("iframeOdyssey"));
+    document.getElementById("odysseyPopup").classList.add("show");
+    document.getElementById("odysseyFab").textContent = "✕";
+  }
+  function closeOdysseyPopup() {
+    if (!odysseyPopupOpen) return;
+    odysseyPopupOpen = false;
+    // Pindah baliknya ke #frames (bukan slot khusus) — aman, karena semua
+    // iframe di dalam .frames itu absolute-positioned & di-toggle lewat class
+    // ".active" (bukan lewat urutan DOM), jadi taruh di mana aja di dalam
+    // .frames hasilnya sama. Class ".active" milik #iframeOdyssey sendiri
+    // udah otomatis kejaga bener sama showTab() walau dia sempet "nganggur"
+    // di dalam popup (classList.toggle tetep jalan di background).
+    document.getElementById("frames").appendChild(document.getElementById("iframeOdyssey"));
+    document.getElementById("odysseyPopup").classList.remove("show");
+    document.getElementById("odysseyFab").textContent = "🤖";
+  }
+  function toggleOdysseyPopup() {
+    if (odysseyPopupOpen) closeOdysseyPopup(); else openOdysseyPopup();
+  }
+
+  document.getElementById("odysseyPopupCloseBtn").addEventListener("click", closeOdysseyPopup);
+  document.getElementById("odysseyExpandBtn").addEventListener("click", function () {
+    // "Buka tampilan penuh": numpang logic showTab yang udah ada (otomatis
+    // nutup popup & mindahin iframe balik ke .frames lewat pengecekan di awal
+    // showTab()), tinggal pindah tab topnav ke "odyssey".
+    showTab("odyssey");
+  });
+
+  // ===== FAB bisa di-drag (geser posisinya), tapi klik biasa (gak digeser)
+  // tetep kebaca sebagai "buka/tutup popup". Posisi terakhir diinget lewat
+  // localStorage biar gak balik ke pojok tiap refresh. =====
+  (function setupOdysseyFabDrag() {
+    var fab = document.getElementById("odysseyFab");
+    var POS_KEY = "odysseyFabPos_v1";
+    var dragging = false, moved = false, startX = 0, startY = 0, origX = 0, origY = 0;
+
+    function clampPos(x, y) {
+      var margin = 8;
+      var maxX = window.innerWidth - fab.offsetWidth - margin;
+      var maxY = window.innerHeight - fab.offsetHeight - margin;
+      return { x: Math.min(Math.max(x, margin), Math.max(margin, maxX)), y: Math.min(Math.max(y, margin), Math.max(margin, maxY)) };
+    }
+    function applyPos(x, y) {
+      var p = clampPos(x, y);
+      fab.style.left = p.x + "px";
+      fab.style.top = p.y + "px";
+      fab.style.right = "auto";
+      fab.style.bottom = "auto";
+      return p;
+    }
+    function savePos(p) {
+      try { localStorage.setItem(POS_KEY, JSON.stringify(p)); } catch (e) { /* abaikan */ }
+    }
+
+    // Posisi awal: pulihin dari localStorage kalau ada (device/browser ini
+    // pernah geser FAB-nya sebelumnya), kalau enggak biarin default CSS
+    // (pojok kanan bawah).
+    try {
+      var saved = JSON.parse(localStorage.getItem(POS_KEY));
+      if (saved && typeof saved.x === "number" && typeof saved.y === "number") applyPos(saved.x, saved.y);
+    } catch (e) { /* abaikan, pakai default CSS */ }
+
+    function pointerXY(e) {
+      var p = (e.touches && e.touches[0]) || e;
+      return { x: p.clientX, y: p.clientY };
+    }
+    function onDown(e) {
+      dragging = true; moved = false;
+      var rect = fab.getBoundingClientRect();
+      var p = pointerXY(e);
+      startX = p.x; startY = p.y; origX = rect.left; origY = rect.top;
+      fab.classList.add("dragging");
+    }
+    function onMove(e) {
+      if (!dragging) return;
+      var p = pointerXY(e);
+      var dx = p.x - startX, dy = p.y - startY;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) moved = true;
+      if (moved) {
+        if (e.cancelable) e.preventDefault();
+        applyPos(origX + dx, origY + dy);
+      }
+    }
+    function onUp() {
+      if (!dragging) return;
+      dragging = false;
+      fab.classList.remove("dragging");
+      if (moved) {
+        var rect = fab.getBoundingClientRect();
+        savePos(applyPos(rect.left, rect.top));
+      } else {
+        toggleOdysseyPopup(); // gak kegeser sama sekali = dianggap KLIK
+      }
+    }
+
+    fab.addEventListener("mousedown", onDown);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    fab.addEventListener("touchstart", onDown, { passive: true });
+    window.addEventListener("touchmove", onMove, { passive: false });
+    window.addEventListener("touchend", onUp);
+    // Kalau jendela di-resize (rotate HP dll), pastiin FAB gak nyangkut di
+    // luar viewport yang baru.
+    window.addEventListener("resize", function () {
+      var rect = fab.getBoundingClientRect();
+      if (rect.left && rect.top) savePos(applyPos(rect.left, rect.top));
+    });
+  })();
 </script>
 
 </body>
