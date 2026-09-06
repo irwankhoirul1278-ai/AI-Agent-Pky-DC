@@ -152,6 +152,19 @@
   details.note-details summary{cursor:pointer; color:var(--cyan);}
   details.note-details .inner{padding:10px 2px 2px; line-height:1.6;}
   details.note-details code{background:var(--panel-2); padding:1px 5px; border-radius:4px; font-family:'IBM Plex Mono',monospace;}
+
+  .modal-overlay{display:none; position:fixed; inset:0; background:rgba(6,8,12,.6); align-items:center; justify-content:center; z-index:50;}
+  .modal-overlay.show{display:flex;}
+  .modal-box{background:var(--panel); border:1px solid var(--line); border-radius:12px; width:min(480px,92vw); max-height:78vh; display:flex; flex-direction:column; overflow:hidden;}
+  .modal-head{display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:1px solid var(--line); font-weight:600; font-size:14px;}
+  .modal-head .icon-btn{padding:3px 9px;}
+  .modal-foot{padding:10px 16px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:8px;}
+  .modal-foot .hint{font-size:11px; color:var(--muted);}
+  #memoryListWrap{overflow-y:auto; padding:12px 16px; display:flex; flex-direction:column; gap:8px;}
+  .mem-item{display:flex; align-items:flex-start; justify-content:space-between; gap:10px; background:var(--panel-2); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:13px; line-height:1.4;}
+  .mem-item span{flex:1;}
+  .mem-item .mem-del{background:transparent; border:none; color:var(--red); cursor:pointer; font-size:14px; flex:none; padding:0 2px;}
+  .mem-empty{color:var(--muted); font-size:13px; padding:24px 0; text-align:center;}
 </style>
 </head>
 <body>
@@ -175,7 +188,22 @@
       <option value="gemini-3.1-flash-lite">3.1 Flash Lite ⚠️</option>
       <option value="gemini-3.5-flash-lite">3.5 Flash Lite ⚠️</option>
     </select>
+    <button class="icon-btn" id="memoryBtn">🧠 Memori</button>
     <button class="icon-btn" id="refreshBtn">Refresh Data</button>
+  </div>
+
+  <div class="modal-overlay" id="memoryModalOverlay">
+    <div class="modal-box">
+      <div class="modal-head">
+        <span>🧠 Memori Odyssey</span>
+        <button class="icon-btn" id="memoryCloseBtn" type="button">✕</button>
+      </div>
+      <div id="memoryListWrap"></div>
+      <div class="modal-foot">
+        <span class="hint">Fakta ini ke-inget lintas sesi & lintas device (login sama).</span>
+        <button class="icon-btn" id="memoryClearAllBtn" type="button">Hapus Semua</button>
+      </div>
+    </div>
   </div>
 
   <div class="chat-panel">
@@ -213,8 +241,71 @@ const MODEL_LABELS = {
 };
 
 let currentTrips = [];
-let chatHistory = []; // {role:'user'|'assistant', content:'...'}
+let chatHistory = []; // {role:'user'|'assistant', content:'...', attachedUnits?:[]}
+let memoryFacts = [];  // array of string — fakta pendek yang diinget lintas sesi
 let firebaseReady = false;
+let currentUid = null;
+
+// ===== A. Cross-device sync (chat history) & B. Memori jangka panjang =====
+// localStorage = cache lokal (render cepet begitu buka halaman + fallback kalau
+// offline/belum login). Firebase (odysseyAgent/<uid>/...) = SUMBER KEBENARAN,
+// nimpa cache lokal begitu login-nya kevalidasi.
+const AGENT_ROOT = "odysseyAgent";
+const CHAT_CACHE_KEY = "odyssey_chatHistory_cache_v1";
+const MEM_CACHE_KEY = "odyssey_memoryFacts_cache_v1";
+function agentChatPath(uid){ return AGENT_ROOT + "/" + uid + "/chatHistory"; }
+function agentMemoryPath(uid){ return AGENT_ROOT + "/" + uid + "/memoryFacts"; }
+
+function loadLocalCache(){
+  try{
+    const c = localStorage.getItem(CHAT_CACHE_KEY);
+    if (c){ const parsed = JSON.parse(c); if (Array.isArray(parsed)) chatHistory = parsed; }
+  }catch(e){ console.warn("Gagal baca cache chat lokal:", e.message); }
+  try{
+    const m = localStorage.getItem(MEM_CACHE_KEY);
+    if (m){ const parsed = JSON.parse(m); if (Array.isArray(parsed)) memoryFacts = parsed; }
+  }catch(e){ console.warn("Gagal baca cache memori lokal:", e.message); }
+}
+function saveLocalCache(){
+  try{ localStorage.setItem(CHAT_CACHE_KEY, JSON.stringify(chatHistory)); }catch(e){}
+  try{ localStorage.setItem(MEM_CACHE_KEY, JSON.stringify(memoryFacts)); }catch(e){}
+}
+// Dipanggil tiap chatHistory berubah (abis user/AI ngirim pesan). Cache lokal
+// SELALU ke-update; sync ke Firebase cuma kalau login-nya udah kevalidasi.
+// Dibatesin 100 pesan terakhir biar node Firebase-nya gak numpuk tak terbatas.
+function saveChatToFirebase(){
+  if (chatHistory.length > 100) chatHistory = chatHistory.slice(-100);
+  saveLocalCache();
+  if (!currentUid) return;
+  firebase.database().ref(agentChatPath(currentUid)).set(chatHistory)
+    .catch(e => console.warn("Gagal sync chat ke Firebase:", e.message));
+}
+function saveMemoryToFirebase(){
+  saveLocalCache();
+  renderMemoryModal();
+  if (!currentUid) return;
+  firebase.database().ref(agentMemoryPath(currentUid)).set(memoryFacts)
+    .catch(e => console.warn("Gagal sync memori ke Firebase:", e.message));
+}
+// Content pesan lama bisa berupa string biasa ATAU array format vision
+// (kalau pesan itu dulu nyertain gambar) — ekstrak jadi {text, image} biar
+// bisa dioper ke addMessage() pas render ulang riwayat.
+function extractHistoryDisplay(content){
+  if (Array.isArray(content)){
+    const textPart = content.find(p => p && p.type === "text");
+    const imgPart = content.find(p => p && p.type === "image_url");
+    return { text: (textPart && textPart.text) || "", image: imgPart ? (imgPart.image_url && imgPart.image_url.url) : null };
+  }
+  return { text: String(content || ""), image: null };
+}
+function renderChatHistory(){
+  const log = document.getElementById("chatLog");
+  log.innerHTML = "";
+  chatHistory.forEach(m => {
+    const { text, image } = extractHistoryDisplay(m.content);
+    addMessage(m.role === "assistant" ? "agent" : "user", text, m.attachedUnits || null, image);
+  });
+}
 
 // ===== Mock data (dipakai kalau live toggle mati / firebase belum siap) =====
 function generateMockData(dateStr){
@@ -484,6 +575,7 @@ async function askAgent(question, imageDataUrl){
       ]
     : question;
   chatHistory.push({role:"user", content: userContent, hasImage: !!imageDataUrl});
+  saveChatToFirebase();
   addTyping();
 
   const lateCount = currentTrips.filter(t => t.status === "Late Arrival").length;
@@ -506,7 +598,13 @@ mantau trip Inbound (Line Haul dari origin ke DC), TAPI wawasan kamu gak kebatas
 pengetahuan umum yang luas kayak asisten AI pada umumnya — bebas diajak diskusi, nanya hal umum, minta
 bantuan nulis/ngoding, brainstorming, atau apapun di luar topik dashboard. Gaya ngomong santai kayak
 ngobrol sama rekan kerja sendiri (natural, boleh pakai "bro", boleh bercanda dikit, gak kaku/formal) —
-tapi tetep sopan & jawabannya harus BENERAN membantu/akurat, jangan asal karena sok santai.`;
+tapi tetep sopan & jawabannya harus BENERAN membantu/akurat, jangan asal karena sok santai.${
+  memoryFacts.length
+    ? `\n\nMemori Tersimpan (fakta yang udah kamu inget dari sesi/device sebelumnya — dipakai diam-diam
+sebagai konteks, JANGAN nanya ulang hal yang udah ada di sini, dan JANGAN nyebut "sesuai memori saya"
+segala macam, cukup pake apa adanya kayak emang udah tau dari awal):\n- ${memoryFacts.join("\n- ")}`
+    : ""
+}`;
 
   const jsonFormatRule = `WAJIB balas HANYA dengan JSON valid, tanpa teks lain di luar JSON, tanpa markdown
 code fence, persis format ini:
@@ -517,7 +615,18 @@ baru bikin item array baru (baris kosong = string kosong \"\")"], "attachedUnits
 Kalau jawabannya butuh nulis KODE/HTML/script panjang: tetap ikutin aturan array di atas — PECAH tiap
 baris kode jadi 1 item array terpisah (persis kayak baris asli kodenya, boleh diawali spasi buat
 indentasi), JANGAN digabung jadi satu string panjang dengan escape \\n. Kalau ada tanda kutip dua (")
-DI DALAM baris kode/teks, WAJIB di-escape jadi \\" biar JSON-nya tetep valid.`;
+DI DALAM baris kode/teks, WAJIB di-escape jadi \\" biar JSON-nya tetep valid.
+
+MEMORI JANGKA PANJANG (opsional, numpang di JSON yang SAMA ini, JANGAN bikin API call/turn terpisah):
+kalau di pesan user kali ini ada FAKTA BARU yang layak diinget lintas sesi/device — nama, jabatan/role,
+preferensi kerja, hal yang lagi diurus berulang, dan sejenisnya, yang MASIH BAKAL RELEVAN di sesi
+BERIKUTNYA (bukan basa-basi/obrolan receh sesaat) — tambahin field opsional "memoryUpdates":
+{"memoryUpdates": {"add": ["fakta baru, ringkas jadi 1 kalimat pendek"], "remove": ["fakta LAMA yang
+mau dihapus/diganti — teksnya harus PERSIS SAMA kayak yang ada di daftar Memori Tersimpan di atas"]}}
+Boleh salah satu array-nya kosong, atau field "memoryUpdates" ini gak usah disertain sama sekali kalau
+emang gak ada yang perlu diupdate turn ini (JANGAN dipaksain ada tiap turn). JANGAN nyimpen data sensitif
+(kesehatan, keuangan pribadi, data pribadi orang lain, dll) dan JANGAN nyimpen transkrip obrolan mentah —
+cukup fakta pendek yang padat.`;
 
   let systemPrompt;
   if (isDwReport){
@@ -854,6 +963,23 @@ Contoh buat jawaban singkat 1 baris, "replyLines" tetap array isi 1 item, misal:
       document.getElementById("statusLine").textContent = base + " · model: " + label;
     }
 
+    // Proses "memoryUpdates" opsional dari respons AI (fitur Memori jangka
+    // panjang) — numpang di JSON balasan yang SAMA, gak nambah API call.
+    if (parsed.memoryUpdates && typeof parsed.memoryUpdates === "object"){
+      const toAdd = Array.isArray(parsed.memoryUpdates.add) ? parsed.memoryUpdates.add : [];
+      const toRemove = Array.isArray(parsed.memoryUpdates.remove) ? parsed.memoryUpdates.remove : [];
+      let memChanged = false;
+      toRemove.forEach(f => {
+        const idx = memoryFacts.indexOf(String(f || "").trim());
+        if (idx !== -1){ memoryFacts.splice(idx, 1); memChanged = true; }
+      });
+      toAdd.forEach(f => {
+        const fact = String(f || "").trim();
+        if (fact && !memoryFacts.includes(fact)){ memoryFacts.push(fact); memChanged = true; }
+      });
+      if (memChanged) saveMemoryToFirebase();
+    }
+
     // Susun teks final dari array replyLines (baris baru beneran, bukan hasil
     // escape dari AI) — kalau AI masih pakai format lama "reply" (string biasa),
     // tetap didukung biar gak putus kompatibilitas.
@@ -866,7 +992,11 @@ Contoh buat jawaban singkat 1 baris, "replyLines" tetap array isi 1 item, misal:
 
     removeTyping();
     addMessage("agent", replyText, parsed.attachedUnits);
-    chatHistory.push({role:"assistant", content: replyText});
+    // Simpen "attachedUnits" juga (bukan cuma teksnya) biar pas riwayat ditarik
+    // ulang dari Firebase/cache di device lain, tabelnya ke-render lagi persis,
+    // bukan cuma teks polos.
+    chatHistory.push({role:"assistant", content: replyText, attachedUnits: parsed.attachedUnits || []});
+    saveChatToFirebase();
   }catch(e){
     console.error(e);
     removeTyping();
@@ -925,20 +1055,105 @@ document.getElementById("chatInput").addEventListener("keydown", (e) => {
 
 // Sama kayak inbound.html: baru mulai sync Firebase SETELAH status login kevalidasi.
 // Begitu status login berubah (mis. auth-guard.js baru selesai validasi setelah
-// halaman ke-render), langsung auto-reload data dari live Firebase.
+// halaman ke-render), langsung auto-reload data dari live Firebase — DAN tarik
+// riwayat chat + memori dari odysseyAgent/<uid>/... (sumber kebenaran, nimpa
+// cache lokal yang tadi sempet dipakai render cepet pas awal buka halaman).
 if (window.firebase && firebase.auth){
   try{
     firebase.auth().onAuthStateChanged(function(user){
       const wasReady = firebaseReady;
       firebaseReady = !!user;
-      if (firebaseReady && !wasReady) loadData();
+      if (firebaseReady && !wasReady){
+        currentUid = user.uid;
+        loadData();
+        const db = firebase.database();
+        db.ref(agentChatPath(currentUid)).once("value").then(snap => {
+          const val = snap.val();
+          if (Array.isArray(val) && val.length){
+            chatHistory = val;
+            renderChatHistory();
+            saveLocalCache();
+          } else if (chatHistory.length){
+            // Belum ada riwayat di Firebase (device/akun baru) tapi cache lokal
+            // ada isinya — dorong cache lokal itu ke Firebase biar langsung
+            // ke-sync ke device lain juga.
+            saveChatToFirebase();
+          }
+        }).catch(e => console.warn("Gagal ambil riwayat chat dari Firebase:", e.message));
+        db.ref(agentMemoryPath(currentUid)).once("value").then(snap => {
+          const val = snap.val();
+          if (Array.isArray(val)){
+            memoryFacts = val;
+            saveLocalCache();
+            renderMemoryModal();
+          } else if (memoryFacts.length){
+            saveMemoryToFirebase();
+          }
+        }).catch(e => console.warn("Gagal ambil memori dari Firebase:", e.message));
+      }
     });
   }catch(e){ console.warn("Firebase auth belum siap:", e.message); }
 }
 
+// ===== Tombol & modal Memori =====
+document.getElementById("memoryBtn").addEventListener("click", () => {
+  renderMemoryModal();
+  document.getElementById("memoryModalOverlay").classList.add("show");
+});
+document.getElementById("memoryCloseBtn").addEventListener("click", () => {
+  document.getElementById("memoryModalOverlay").classList.remove("show");
+});
+document.getElementById("memoryModalOverlay").addEventListener("click", (e) => {
+  if (e.target.id === "memoryModalOverlay") e.currentTarget.classList.remove("show");
+});
+document.getElementById("memoryClearAllBtn").addEventListener("click", () => {
+  if (!memoryFacts.length) return;
+  if (!confirm("Yakin mau hapus SEMUA memori bro?")) return;
+  memoryFacts = [];
+  saveMemoryToFirebase();
+});
+function renderMemoryModal(){
+  const wrap = document.getElementById("memoryListWrap");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  if (!memoryFacts.length){
+    wrap.innerHTML = '<div class="mem-empty">Belum ada yang diinget bro.</div>';
+    return;
+  }
+  memoryFacts.forEach((fact, idx) => {
+    const row = document.createElement("div");
+    row.className = "mem-item";
+    const span = document.createElement("span");
+    span.textContent = fact;
+    const del = document.createElement("button");
+    del.className = "mem-del";
+    del.type = "button";
+    del.title = "Hapus fakta ini";
+    del.textContent = "✕";
+    del.addEventListener("click", () => {
+      memoryFacts.splice(idx, 1);
+      saveMemoryToFirebase();
+    });
+    row.appendChild(span);
+    row.appendChild(del);
+    wrap.appendChild(row);
+  });
+}
+
 (async function init(){
+  // Cache lokal dulu biar chat langsung keliatan tanpa nunggu Firebase/login
+  // kevalidasi (fallback offline juga). Nanti begitu login-nya kevalidasi,
+  // listener auth di atas bakal timpa ini pake data Firebase yang lebih baru.
+  loadLocalCache();
+  if (chatHistory.length){
+    renderChatHistory();
+  } else {
+    const greeting = "Halo bro, gua AI Agent buat mantau operasional & daily report Palangka Raya DC\"";
+    addMessage("agent", greeting);
+    chatHistory.push({role:"assistant", content: greeting});
+    saveLocalCache();
+  }
   await loadData();
-  addMessage("agent", "Halo bro, gua AI Agent buat mantau trip Inbound hari ini. Tanya aja, misal \"ada yang Late Arrival hari ini?\" atau \"yang paling lama durasinya berapa?\"");
 })();
 </script>
 </body>
